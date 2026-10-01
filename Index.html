@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Pocket Arcade</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{
+  --bg:#241B3A; --panel:#33284F; --ink:#F7F2FF; --dim:#B9AED6;
+  --butter:#FFD36B; --coral:#FF6F59; --mint:#7BE0B5; --lilac:#B7A6FF;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+*,*::before,*::after{box-sizing:inherit;margin:0}
+html,body{height:100%}
+body{
+  background:var(--bg);color:var(--ink);
+  font-family:ui-rounded,"SF Pro Rounded","Trebuchet MS",system-ui,sans-serif;
+  -webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;
+  overscroll-behavior:none;
+}
+button{font:inherit;color:inherit;border:0;cursor:pointer}
+button:focus-visible{outline:3px solid var(--butter);outline-offset:2px}
+.screen{display:none;min-height:100%;padding:20px 18px 28px;max-width:460px;margin:0 auto}
+.screen.on{display:block}
+
+h1{font-size:34px;line-height:1.05;font-weight:900;letter-spacing:-.02em}
+.sub{color:var(--dim);margin:6px 0 22px}
+.tile{
+  display:flex;align-items:center;gap:16px;width:100%;text-align:left;
+  padding:16px;margin-bottom:12px;border-radius:22px;color:#241B3A;
+  transition:transform .12s;
+}
+.tile:active{transform:scale(.97)}
+.tile .ic{font-size:40px;width:64px;height:64px;display:grid;place-items:center;background:rgba(255,255,255,.45);border-radius:18px}
+.tile b{display:block;font-size:20px}
+.tile span{font-size:14px;opacity:.75}
+.tile .best{margin-left:auto;text-align:right;font-weight:800;font-size:22px}
+.tile .best small{display:block;font-size:11px;font-weight:600;opacity:.7}
+.t-snake{background:var(--mint)} .t-memory{background:var(--lilac)} .t-rush{background:var(--butter)}
+
+.bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.back{background:var(--panel);padding:10px 16px;border-radius:14px;font-weight:700}
+.hud{font-weight:900;font-size:20px}
+.stage{position:relative;width:100%;max-width:360px;margin:0 auto}
+canvas{display:block;width:100%;aspect-ratio:1;border-radius:20px;background:var(--panel);touch-action:none}
+.hint{text-align:center;color:var(--dim);font-size:14px;margin-top:14px}
+
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.card{aspect-ratio:1;border-radius:16px;background:var(--panel);font-size:34px;display:grid;place-items:center;transition:transform .25s,background .25s}
+.card.up{background:var(--lilac)}
+.card.done{background:var(--mint)}
+.card i{font-style:normal;opacity:0;transition:opacity .15s}
+.card.up i,.card.done i{opacity:1}
+
+.arena{position:relative;height:360px;background:var(--panel);border-radius:20px;overflow:hidden;touch-action:manipulation}
+.target{position:absolute;border-radius:50%;background:var(--coral);box-shadow:0 0 0 6px rgba(255,111,89,.3);animation:pop .15s ease-out}
+@keyframes pop{from{transform:scale(.4)}to{transform:scale(1)}}
+
+.over{
+  position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+  background:rgba(36,27,58,.92);border-radius:20px;text-align:center;padding:20px;z-index:5;
+}
+.over.on{display:flex}
+.over h2{font-size:30px;font-weight:900}
+.over .big{font-size:56px;font-weight:900;color:var(--butter);line-height:1}
+.over p{color:var(--dim)}
+.row{display:flex;gap:10px;margin-top:8px}
+.btn{padding:14px 22px;border-radius:16px;font-weight:800;background:var(--butter);color:#241B3A}
+.btn.alt{background:var(--panel);color:var(--ink)}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<main id="menu" class="screen on">
+  <h1>Pocket Arcade</h1>
+  <p class="sub">Three quick games. Beat your best score.</p>
+  <button class="tile t-snake" data-game="snake"><div class="ic">🐍</div><div><b>Snake</b><span>Swipe to steer</span></div><div class="best"><small>Best</small><em id="b-snake">0</em></div></button>
+  <button class="tile t-memory" data-game="memory"><div class="ic">🧠</div><div><b>Memory</b><span>Match all pairs</span></div><div class="best"><small>Fewest moves</small><em id="b-memory">–</em></div></button>
+  <button class="tile t-rush" data-game="rush"><div class="ic">🎯</div><div><b>Tap Rush</b><span>20 seconds, hit targets</span></div><div class="best"><small>Best</small><em id="b-rush">0</em></div></button>
+</main>
+
+<section id="game" class="screen">
+  <div class="bar"><button class="back" id="backBtn">Back</button><div class="hud" id="hud"></div></div>
+  <div class="stage" id="stage"></div>
+  <p class="hint" id="hint"></p>
+</section>
+
+<script>
+// ---------- Telegram setup ----------
+const tg = window.Telegram && Telegram.WebApp;
+const BOT_LINK = 'https://t.me/YourBot/app'; // change to your Mini App link
+if (tg) {
+  tg.ready(); tg.expand();
+  try { tg.disableVerticalSwipes(); } catch (e) {}
+  try { tg.setHeaderColor('#241B3A'); tg.setBackgroundColor('#241B3A'); } catch (e) {}
+}
+const buzz = (t) => { try { tg.HapticFeedback.impactOccurred(t || 'light'); } catch (e) {} };
+const notify = (t) => { try { tg.HapticFeedback.notificationOccurred(t); } catch (e) {} };
+
+// ---------- Storage: Telegram CloudStorage, falls back to localStorage ----------
+const cloud = tg && tg.CloudStorage && tg.isVersionAtLeast && tg.isVersionAtLeast('6.9');
+const store = {
+  get: (k) => new Promise((res) => {
+    if (cloud) tg.CloudStorage.getItem(k, (err, v) => res(err ? 0 : Number(v) || 0));
+    else { try { res(Number(localStorage.getItem(k)) || 0); } catch (e) { res(0); } }
+  }),
+  set: (k, v) => {
+    if (cloud) tg.CloudStorage.setItem(k, String(v));
+    else { try { localStorage.setItem(k, String(v)); } catch (e) {} }
+  }
+};
+const best = { snake: 0, memory: 0, rush: 0 };
+function paintBest() {
+  document.getElementById('b-snake').textContent = best.snake;
+  document.getElementById('b-memory').textContent = best.memory || '–';
+  document.getElementById('b-rush').textContent = best.rush;
+}
+Promise.all(Object.keys(best).map((k) => store.get('best_' + k).then((v) => (best[k] = v)))).then(paintBest);
+
+// ---------- Navigation ----------
+const $ = (id) => document.getElementById(id);
+const stage = $('stage'), hud = $('hud'), hint = $('hint');
+let stopGame = null, current = null;
+
+function show(id) {
+  document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('on', s.id === id));
+}
+function openGame(name) {
+  current = name; show('game');
+  if (tg) { tg.BackButton.show(); }
+  launch();
+}
+function launch() {
+  if (stopGame) stopGame();
+  stage.innerHTML = '';
+  const over = document.createElement('div');
+  over.className = 'over'; over.id = 'over';
+  const finish = (score, text) => endGame(score, text);
+  stopGame = GAMES[current](stage, hud, hint, finish);
+  stage.appendChild(over);
+}
+function goMenu() {
+  if (stopGame) stopGame(); stopGame = null;
+  show('menu'); paintBest();
+  if (tg) tg.BackButton.hide();
+}
+$('backBtn').onclick = goMenu;
+if (tg) tg.BackButton.onClick(goMenu);
+document.querySelectorAll('.tile').forEach((t) => (t.onclick = () => openGame(t.dataset.game)));
+
+function endGame(score, label) {
+  const isMemory = current === 'memory';
+  const prev = best[current];
+  const record = isMemory ? (!prev || score < prev) : score > prev;
+  if (record) { best[current] = score; store.set('best_' + current, score); }
+  notify(record ? 'success' : 'warning');
+  const over = $('over');
+  over.innerHTML = '<h2>' + (record ? 'New best!' : 'Game over') + '</h2>' +
+    '<div class="big">' + score + '</div><p>' + label + '</p>' +
+    '<div class="row"><button class="btn" id="again">Play again</button>' +
+    '<button class="btn alt" id="share">Share</button></div>';
+  over.classList.add('on');
+  $('again').onclick = launch;
+  $('share').onclick = () => {
+    const text = 'I scored ' + score + ' (' + label + ') in Pocket Arcade! Can you beat me?';
+    const url = 'https://t.me/share/url?url=' + encodeURIComponent(BOT_LINK) + '&text=' + encodeURIComponent(text);
+    if (tg) tg.openTelegramLink(url); else window.open(url, '_blank');
+  };
+}
+
+// ---------- Games ----------
+const GAMES = {};
+
+// Snake: swipe or arrow keys, edges wrap around
+GAMES.snake = (root, hudEl, hintEl, finish) => {
+  const N = 15, S = 24, cv = document.createElement('canvas');
+  cv.width = cv.height = N * S; root.prepend(cv);
+  const g = cv.getContext('2d');
+  let body = [{ x: 7, y: 7 }], dir = { x: 1, y: 0 }, queued = dir, food, score = 0, timer;
+  hintEl.textContent = 'Swipe on the board to steer.';
+  const place = () => {
+    do { food = { x: Math.floor(Math.random() * N), y: Math.floor(Math.random() * N) }; }
+    while (body.some((b) => b.x === food.x && b.y === food.y));
+  };
+  const draw = () => {
+    g.clearRect(0, 0, N * S, N * S);
+    g.fillStyle = '#FF6F59'; g.beginPath(); g.arc(food.x * S + S / 2, food.y * S + S / 2, S / 2 - 3, 0, 7); g.fill();
+    body.forEach((b, i) => {
+      g.fillStyle = i ? '#7BE0B5' : '#FFD36B';
+      g.beginPath(); g.roundRect(b.x * S + 2, b.y * S + 2, S - 4, S - 4, 7); g.fill();
+    });
+  };
+  const step = () => {
+    dir = queued;
+    const h = body[0], n = { x: (h.x + dir.x + N) % N, y: (h.y + dir.y + N) % N };
+    if (body.some((b) => b.x === n.x && b.y === n.y)) {
+      clearInterval(timer); finish(score, 'apples eaten'); return;
+    }
+    body.unshift(n);
+    if (n.x === food.x && n.y === food.y) {
+      score++; buzz(); place();
+      clearInterval(timer); timer = setInterval(step, Math.max(70, 130 - score * 3));
+    } else body.pop();
+    hudEl.textContent = 'Score ' + score; draw();
+  };
+  const turn = (x, y) => { if (x !== -dir.x || y !== -dir.y) queued = { x, y }; };
+  let sx, sy;
+  const ts = (e) => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; };
+  const te = (e) => {
+    const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 20) return;
+    Math.abs(dx) > Math.abs(dy) ? turn(Math.sign(dx), 0) : turn(0, Math.sign(dy));
+  };
+  const key = (e) => {
+    const m = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] }[e.key];
+    if (m) { e.preventDefault(); turn(m[0], m[1]); }
+  };
+  cv.addEventListener('touchstart', ts, { passive: true });
+  cv.addEventListener('touchend', te);
+  addEventListener('keydown', key);
+  place(); hudEl.textContent = 'Score 0'; draw();
+  timer = setInterval(step, 130);
+  return () => { clearInterval(timer); removeEventListener('keydown', key); };
+};
+
+// Memory: find all 8 pairs in as few moves as possible
+GAMES.memory = (root, hudEl, hintEl, finish) => {
+  const icons = ['🦊', '🐙', '🌵', '🍄', '🪐', '🎲', '🦋', '🍒'];
+  const deck = [...icons, ...icons].sort(() => Math.random() - 0.5);
+  const grid = document.createElement('div'); grid.className = 'grid'; root.prepend(grid);
+  let open = [], lock = false, moves = 0, found = 0, stopped = false;
+  hintEl.textContent = 'Flip two cards. Fewer moves is better.';
+  hudEl.textContent = 'Moves 0';
+  deck.forEach((ic) => {
+    const c = document.createElement('button');
+    c.className = 'card'; c.innerHTML = '<i>' + ic + '</i>'; c.setAttribute('aria-label', 'Card');
+    c.onclick = () => {
+      if (lock || stopped || c.classList.contains('up') || c.classList.contains('done')) return;
+      c.classList.add('up'); open.push(c); buzz('light');
+      if (open.length < 2) return;
+      moves++; hudEl.textContent = 'Moves ' + moves;
+      const [a, b] = open; open = [];
+      if (a.textContent === b.textContent) {
+        a.className = b.className = 'card done'; found++; notify('success');
+        if (found === icons.length) setTimeout(() => !stopped && finish(moves, 'moves'), 400);
+      } else {
+        lock = true;
+        setTimeout(() => { a.classList.remove('up'); b.classList.remove('up'); lock = false; }, 700);
+      }
+    };
+    grid.appendChild(c);
+  });
+  return () => { stopped = true; };
+};
+
+// Tap Rush: hit as many targets as you can in 20 seconds
+GAMES.rush = (root, hudEl, hintEl, finish) => {
+  const arena = document.createElement('div'); arena.className = 'arena'; root.prepend(arena);
+  let time = 20, score = 0, target, life, tick, stopped = false;
+  hintEl.textContent = 'Tap the red dot. Missing costs 1 second.';
+  const paint = () => { hudEl.textContent = 'Score ' + score + '  |  ' + Math.max(0, time).toFixed(1) + 's'; };
+  const spawn = () => {
+    clearTimeout(life); if (target) target.remove();
+    const size = Math.max(36, 70 - score * 1.5), w = arena.clientWidth, h = arena.clientHeight;
+    target = document.createElement('div'); target.className = 'target';
+    target.style.cssText = 'width:' + size + 'px;height:' + size + 'px;left:' + Math.random() * (w - size) + 'px;top:' + Math.random() * (h - size) + 'px';
+    arena.appendChild(target);
+    life = setTimeout(spawn, 1400);
+  };
+  arena.addEventListener('pointerdown', (e) => {
+    if (stopped) return;
+    if (e.target === target) { score++; buzz(); spawn(); }
+    else { time -= 1; buzz('rigid'); }
+    paint();
+  });
+  tick = setInterval(() => {
+    time -= 0.1; paint();
+    if (time <= 0) {
+      stopped = true; clearInterval(tick); clearTimeout(life);
+      finish(score, 'targets hit');
+    }
+  }, 100);
+  paint(); spawn();
+  return () => { stopped = true; clearInterval(tick); clearTimeout(life); };
+};
+</script>
+</body>
+  </html>
